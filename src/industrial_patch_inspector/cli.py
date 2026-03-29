@@ -9,6 +9,14 @@ import cv2
 import numpy as np
 import torch
 
+from .analysis import (
+    build_thresholds,
+    collect_active_patch_zone_outputs,
+    select_best_f1,
+    select_best_recall_under_ok_fpr,
+    summarize_patch_zones,
+    sweep_binary_thresholds,
+)
 from .calibration import calibrate_sample_threshold, collect_sample_probabilities, with_sample_threshold
 from .config import load_config
 from .losses import InspectionCriterion
@@ -218,6 +226,70 @@ def cmd_evaluate_split(args: argparse.Namespace) -> None:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
 
 
+def cmd_diagnose_split(args: argparse.Namespace) -> None:
+    config = load_config(args.config)
+    effective_threshold = _resolve_sample_threshold(config, args.sample_threshold, args.calibration_json)
+    config = with_sample_threshold(config, effective_threshold)
+    device = _resolve_device(config.training.device)
+    _, classifier = _load_classifier(args.config, args.checkpoint, device)
+
+    thresholds = build_thresholds(
+        args.min_threshold if args.min_threshold >= 0.0 else config.calibration.min_threshold,
+        args.max_threshold if args.max_threshold >= 0.0 else config.calibration.max_threshold,
+        args.num_thresholds if args.num_thresholds > 0 else config.calibration.num_thresholds,
+    )
+
+    sample_probs, sample_labels = collect_sample_probabilities(
+        config,
+        classifier.to(device),
+        device,
+        args.split,
+    )
+    sample_sweep = sweep_binary_thresholds(sample_probs, sample_labels, thresholds)
+    current_metrics = compute_binary_classification_metrics(sample_labels, sample_probs, effective_threshold).to_dict()
+    current_metrics["ok_fpr"] = 1.0 - float(current_metrics["specificity"]) if int(current_metrics["ok_count"]) > 0 else 0.0
+    current_metrics["ng_recall"] = float(current_metrics["recall"])
+
+    patch_outputs = collect_active_patch_zone_outputs(
+        config,
+        classifier.to(device),
+        device,
+        args.split,
+    )
+    zone_summary = summarize_patch_zones(
+        patch_outputs.patch_probabilities,
+        patch_outputs.patch_labels,
+        patch_outputs.zone_rows,
+        patch_outputs.zone_cols,
+        thresholds=thresholds,
+        default_threshold=float(config.aggregation.patch_threshold),
+        ok_fpr_target=float(config.calibration.ok_fpr_target),
+        top_k=args.top_k,
+    )
+
+    payload = {
+        "split": args.split,
+        "checkpoint": args.checkpoint,
+        "config": args.config,
+        "sample_threshold_in_use": float(effective_threshold),
+        "patch_threshold_in_use": float(config.aggregation.patch_threshold),
+        "ok_fpr_target": float(config.calibration.ok_fpr_target),
+        "sample_threshold_sweep": {
+            "best_f1": select_best_f1(sample_sweep),
+            "best_recall_under_ok_fpr": select_best_recall_under_ok_fpr(sample_sweep, config.calibration.ok_fpr_target),
+            "current_threshold": current_metrics,
+            "entries": sample_sweep,
+        },
+        "patch_zone_analysis": zone_summary,
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    if args.output_json:
+        output_path = Path(args.output_json)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+
+
 def cmd_calibrate(args: argparse.Namespace) -> None:
     config = load_config(args.config)
     device = _resolve_device(config.training.device)
@@ -293,6 +365,19 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--sample-threshold", type=float, default=-1.0)
     evaluate.add_argument("--output-json", default="")
     evaluate.set_defaults(func=cmd_evaluate_split)
+
+    diagnose = subparsers.add_parser("diagnose-split", help="Run threshold sweep and zone hotspot analysis on a split")
+    diagnose.add_argument("--config", required=True)
+    diagnose.add_argument("--checkpoint", required=True)
+    diagnose.add_argument("--split", default="val")
+    diagnose.add_argument("--calibration-json", default="")
+    diagnose.add_argument("--sample-threshold", type=float, default=-1.0)
+    diagnose.add_argument("--min-threshold", type=float, default=-1.0)
+    diagnose.add_argument("--max-threshold", type=float, default=-1.0)
+    diagnose.add_argument("--num-thresholds", type=int, default=0)
+    diagnose.add_argument("--top-k", type=int, default=8)
+    diagnose.add_argument("--output-json", default="")
+    diagnose.set_defaults(func=cmd_diagnose_split)
 
     return parser
 

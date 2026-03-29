@@ -146,7 +146,13 @@ python run_cli.py predict-dir --config examples/config.toml --checkpoint checkpo
 python run_cli.py evaluate-split --config examples/config.toml --checkpoint checkpoints/patch_last.pt --split test --output-json outputs/evaluation.json
 ```
 
-9. Run the unit tests:
+9. Diagnose threshold sweep and zone hotspots:
+
+```bash
+python run_cli.py diagnose-split --config examples/config.toml --checkpoint checkpoints/patch_last.pt --split val --output-json outputs/diagnostics.json
+```
+
+10. Run the unit tests:
 
 ```bash
 python -m pytest -q
