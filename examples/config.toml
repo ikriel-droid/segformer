@@ -1,0 +1,75 @@
+[dataset]
+root = "dataset"
+image_dir = "leftImg8bit"
+label_dir = "gtFine"
+train_split = "train"
+val_split = "val"
+test_split = "test"
+image_name_token = "_leftImg8bit"
+label_name_token = "_gtFine_labelIds"
+defect_label_ids = [1]
+ignore_label_ids = [255]
+image_size = [640, 640]
+
+[alignment]
+method = "identity"
+template_image = ""
+template_roi = ""
+ecc_iterations = 80
+ecc_eps = 1e-5
+max_keypoints = 500
+
+[roi]
+use_template_roi = true
+use_otsu = false
+exclude_border = 4
+min_component_area = 128
+threshold_value = 0
+
+[tiling]
+tile_size = 128
+stride = 64
+context_scale = 2.0
+min_roi_fraction = 0.05
+positive_fraction = 0.01
+
+[model]
+embedding_dim = 192
+dropout = 0.1
+
+[loss]
+patch_weight = 1.0
+sample_weight = 1.0
+contrastive_weight = 0.1
+focal_alpha = 0.25
+focal_gamma = 2.0
+contrastive_temperature = 0.2
+
+[aggregation]
+top_k = 6
+patch_threshold = 0.55
+sample_threshold = 0.50
+topk_weight = 0.55
+component_weight = 0.30
+adjacency_weight = 0.15
+min_component_size = 2
+
+[refiner]
+enabled = true
+base_channels = 32
+suspicious_threshold = 0.55
+
+[calibration]
+ok_fpr_target = 0.01
+min_threshold = 0.05
+max_threshold = 0.95
+num_thresholds = 181
+
+[training]
+batch_size = 2
+num_workers = 0
+epochs = 20
+learning_rate = 0.0003
+weight_decay = 0.0001
+device = "cuda"
+checkpoint_dir = "checkpoints"

@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "industrial-patch-inspector"
+version = "0.1.0"
+description = "Context-aware patch classification pipeline for industrial inspection"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "numpy>=1.26",
+  "torch>=2.3",
+  "torchvision>=0.18",
+  "opencv-python>=4.10",
+]
+
+[project.scripts]
+ipi = "industrial_patch_inspector.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
