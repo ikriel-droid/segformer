@@ -140,6 +140,12 @@ python run_cli.py calibrate --config examples/config.toml --checkpoint checkpoin
 python run_cli.py predict-dir --config examples/config.toml --checkpoint checkpoints/patch_last.pt --image-dir path/to/images --output-json outputs/predictions.json
 ```
 
+8. Run the unit tests:
+
+```bash
+python -m pytest -q
+```
+
 ## One-command pipeline
 
 On this Windows workspace, the easiest way to run everything in order is:
