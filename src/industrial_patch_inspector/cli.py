@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
@@ -11,6 +12,7 @@ import torch
 from .calibration import calibrate_sample_threshold, collect_sample_probabilities, with_sample_threshold
 from .config import load_config
 from .losses import InspectionCriterion
+from .metrics import compute_binary_classification_metrics
 from .models import ContextAwarePatchClassifier
 from .pipeline import PatchInspectionSystem
 from .refiner import SuspiciousTileRefiner
@@ -49,6 +51,24 @@ def _load_optional_refiner(config, refiner_checkpoint: str, device: torch.device
 def _save_refined_mask(mask: np.ndarray, output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(output_path), np.clip(mask * 255.0, 0, 255).astype(np.uint8))
+
+
+def _resolve_sample_threshold(
+    config,
+    sample_threshold: float,
+    calibration_json: str,
+) -> float:
+    threshold = float(config.aggregation.sample_threshold)
+    if calibration_json:
+        with Path(calibration_json).open("r", encoding="utf-8") as handle:
+            calibration_payload = json.load(handle)
+        if "recommended_sample_threshold" not in calibration_payload:
+            msg = f"recommended_sample_threshold not found in {calibration_json}"
+            raise KeyError(msg)
+        threshold = float(calibration_payload["recommended_sample_threshold"])
+    if sample_threshold >= 0.0:
+        threshold = float(sample_threshold)
+    return threshold
 
 
 def cmd_train_patch(args: argparse.Namespace) -> None:
@@ -118,8 +138,8 @@ def cmd_train_refiner(args: argparse.Namespace) -> None:
 
 def cmd_predict(args: argparse.Namespace) -> None:
     config = load_config(args.config)
-    if args.sample_threshold >= 0.0:
-        config = with_sample_threshold(config, float(args.sample_threshold))
+    effective_threshold = _resolve_sample_threshold(config, args.sample_threshold, args.calibration_json)
+    config = with_sample_threshold(config, effective_threshold)
     device = _resolve_device(config.training.device)
     _, classifier = _load_classifier(args.config, args.checkpoint, device)
     refiner = _load_optional_refiner(config, args.refiner_checkpoint, device)
@@ -135,8 +155,8 @@ def cmd_predict(args: argparse.Namespace) -> None:
 
 def cmd_predict_dir(args: argparse.Namespace) -> None:
     config = load_config(args.config)
-    if args.sample_threshold >= 0.0:
-        config = with_sample_threshold(config, float(args.sample_threshold))
+    effective_threshold = _resolve_sample_threshold(config, args.sample_threshold, args.calibration_json)
+    config = with_sample_threshold(config, effective_threshold)
     device = _resolve_device(config.training.device)
     _, classifier = _load_classifier(args.config, args.checkpoint, device)
     refiner = _load_optional_refiner(config, args.refiner_checkpoint, device)
@@ -171,6 +191,31 @@ def cmd_predict_dir(args: argparse.Namespace) -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open("w", encoding="utf-8") as handle:
             json.dump(records, handle, ensure_ascii=False, indent=2)
+
+
+def cmd_evaluate_split(args: argparse.Namespace) -> None:
+    config = load_config(args.config)
+    effective_threshold = _resolve_sample_threshold(config, args.sample_threshold, args.calibration_json)
+    config = with_sample_threshold(config, effective_threshold)
+    device = _resolve_device(config.training.device)
+    _, classifier = _load_classifier(args.config, args.checkpoint, device)
+    sample_probs, sample_labels = collect_sample_probabilities(
+        config,
+        classifier.to(device),
+        device,
+        args.split,
+    )
+    metrics = compute_binary_classification_metrics(sample_labels, sample_probs, effective_threshold)
+    payload: dict[str, Any] = metrics.to_dict()
+    payload["split"] = args.split
+    payload["checkpoint"] = args.checkpoint
+    payload["config"] = args.config
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    if args.output_json:
+        output_path = Path(args.output_json)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
 
 
 def cmd_calibrate(args: argparse.Namespace) -> None:
@@ -219,6 +264,7 @@ def build_parser() -> argparse.ArgumentParser:
     predict.add_argument("--image", required=True)
     predict.add_argument("--refiner-checkpoint", default="")
     predict.add_argument("--save-mask", default="")
+    predict.add_argument("--calibration-json", default="")
     predict.add_argument("--sample-threshold", type=float, default=-1.0)
     predict.set_defaults(func=cmd_predict)
 
@@ -229,6 +275,7 @@ def build_parser() -> argparse.ArgumentParser:
     predict_dir.add_argument("--refiner-checkpoint", default="")
     predict_dir.add_argument("--output-json", default="")
     predict_dir.add_argument("--mask-dir", default="")
+    predict_dir.add_argument("--calibration-json", default="")
     predict_dir.add_argument("--sample-threshold", type=float, default=-1.0)
     predict_dir.set_defaults(func=cmd_predict_dir)
 
@@ -237,6 +284,15 @@ def build_parser() -> argparse.ArgumentParser:
     calibrate.add_argument("--checkpoint", required=True)
     calibrate.add_argument("--output-json", default="")
     calibrate.set_defaults(func=cmd_calibrate)
+
+    evaluate = subparsers.add_parser("evaluate-split", help="Evaluate sample-level classification on a split")
+    evaluate.add_argument("--config", required=True)
+    evaluate.add_argument("--checkpoint", required=True)
+    evaluate.add_argument("--split", default="test")
+    evaluate.add_argument("--calibration-json", default="")
+    evaluate.add_argument("--sample-threshold", type=float, default=-1.0)
+    evaluate.add_argument("--output-json", default="")
+    evaluate.set_defaults(func=cmd_evaluate_split)
 
     return parser
 

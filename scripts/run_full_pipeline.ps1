@@ -31,6 +31,7 @@ $PatchCheckpoint = Join-Path $CheckpointDir "patch_last.pt"
 $RefinerCheckpoint = Join-Path $CheckpointDir "refiner_last.pt"
 $CalibrationJson = Join-Path $CheckpointDir "calibration.json"
 $PredictionsJson = Join-Path $OutputRoot "predictions.json"
+$EvaluationJson = Join-Path $OutputRoot "evaluation.json"
 $MaskDir = Join-Path $OutputRoot "masks"
 $TestImageDir = Join-Path $ProjectRoot "$DatasetRoot\leftImg8bit\test\$Category"
 $EffectiveSampleThreshold = $null
@@ -160,6 +161,19 @@ try {
         -Command $predictCommand `
         -LogFile (Join-Path $LogDir "07_predict_dir.log")
 
+    Invoke-Step -Name "Evaluate sample metrics on test split" `
+        -Command @(
+            $PythonExe,
+            (Join-Path $ProjectRoot "run_cli.py"),
+            "evaluate-split",
+            "--config", $GeneratedConfig,
+            "--checkpoint", $PatchCheckpoint,
+            "--split", "test",
+            "--calibration-json", $CalibrationJson,
+            "--output-json", $EvaluationJson
+        ) `
+        -LogFile (Join-Path $LogDir "08_evaluate_split.log")
+
     $summary = @(
         "# Pipeline Summary",
         "",
@@ -172,6 +186,7 @@ try {
         "- Effective sample threshold: $(if ($null -ne $EffectiveSampleThreshold) { $EffectiveSampleThreshold } else { "config default" })",
         "- Refiner checkpoint: $(if (Test-Path $RefinerCheckpoint) { $RefinerCheckpoint } else { "not generated" })",
         "- Predictions json: $PredictionsJson",
+        "- Evaluation json: $EvaluationJson",
         "- Mask dir: $(if (Test-Path $MaskDir) { $MaskDir } else { "not generated" })",
         "",
         "## Automated steps completed",
@@ -183,6 +198,7 @@ try {
         "5. Calibrated the sample threshold on the validation split",
         "6. Trained the refiner",
         "7. Ran prediction on the test directory and exported artifacts",
+        "8. Evaluated sample-level metrics on the test split",
         "",
         "## Remaining work to reach fuller completion",
         "",

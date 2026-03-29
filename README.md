@@ -140,7 +140,13 @@ python run_cli.py calibrate --config examples/config.toml --checkpoint checkpoin
 python run_cli.py predict-dir --config examples/config.toml --checkpoint checkpoints/patch_last.pt --image-dir path/to/images --output-json outputs/predictions.json
 ```
 
-8. Run the unit tests:
+8. Evaluate a checkpoint on a split:
+
+```bash
+python run_cli.py evaluate-split --config examples/config.toml --checkpoint checkpoints/patch_last.pt --split test --output-json outputs/evaluation.json
+```
+
+9. Run the unit tests:
 
 ```bash
 python -m pytest -q
@@ -169,6 +175,7 @@ What it automates:
 5. calibrates the sample threshold
 6. trains the refiner
 7. applies the calibrated sample threshold during test-directory inference and exports predictions
+8. evaluates sample-level metrics on the test split and exports them
 
 Useful variants:
 
